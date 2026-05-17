@@ -41,14 +41,16 @@
    "fieldtype": "Link",
    "label": "Vehicle",
    "options": "Vehicle",
-   "read_only": 1
+   "depends_on": "eval:doc.cicpa_type=='Vehicle'",
+   "mandatory_depends_on": "eval:doc.cicpa_type=='Vehicle'"
   },
   {
    "fieldname": "driver",
    "fieldtype": "Link",
    "label": "Driver",
    "options": "Driver",
-   "read_only": 1
+   "depends_on": "eval:doc.cicpa_type=='Driver'",
+   "mandatory_depends_on": "eval:doc.cicpa_type=='Driver'"
   },
   {
    "fieldname": "issue_date",
@@ -76,7 +78,7 @@
   {
    "fieldname": "document",
    "fieldtype": "Attach",
-   "label": "Document"
+   "label": "CICPA Document"
   },
   {
    "fieldname": "loa",
@@ -105,11 +107,12 @@
    "label": "Active"
   },
   {
+   "allow_on_submit": 1,
    "default": "Active",
    "fieldname": "cicpa_status",
    "fieldtype": "Select",
    "label": "CICPA Status",
-   "options": "\nActive\nCancelled\nExpired",
+   "options": "\nActive\nLost\nCancelled\nExpired",
    "read_only": 1
   }
  ],

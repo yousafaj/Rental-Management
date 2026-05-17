@@ -739,7 +739,7 @@
    "insert_after": "custom_current_rent_type",
    "is_system_generated": 0,
    "is_virtual": 0,
-   "label": "Has CICPA?",
+   "label": "CICPA Issued",
    "length": 0,
    "link_filters": null,
    "mandatory_depends_on": null,

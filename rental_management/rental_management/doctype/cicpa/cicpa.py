@@ -31,6 +31,48 @@ class CICPA(Document):
 		if not self.loa or not self.cicpa_type:
 			return
 
+		if self.cicpa_type == "Driver" and not self.driver:
+			frappe.throw(_("A Driver must be selected when CICPA Type is set to Driver."))
+
+		if self.cicpa_type == "Vehicle" and not self.vehicle:
+			frappe.throw(_("A Vehicle must be selected when CICPA Type is set to Vehicle."))
+
+		# One active CICPA per Driver / Vehicle
+		if self.is_new():
+			if self.cicpa_type == "Driver" and self.driver:
+				existing = frappe.db.get_value(
+					"CICPA",
+					{
+						"driver": self.driver,
+						"cicpa_status": "Active",
+						"docstatus": 1,
+						"name": ["!=", self.name or ""],
+					},
+					"name",
+				)
+				if existing:
+					frappe.throw(_(
+						"Driver {0} already holds an active CICPA ({1}). "
+						"Mark the existing pass as Lost, Cancelled, or Expired before issuing a new one."
+					).format(self.driver, existing))
+
+			if self.cicpa_type == "Vehicle" and self.vehicle:
+				existing = frappe.db.get_value(
+					"CICPA",
+					{
+						"vehicle": self.vehicle,
+						"cicpa_status": "Active",
+						"docstatus": 1,
+						"name": ["!=", self.name or ""],
+					},
+					"name",
+				)
+				if existing:
+					frappe.throw(_(
+						"Vehicle {0} already holds an active CICPA ({1}). "
+						"Mark the existing pass as Lost, Cancelled, or Expired before issuing a new one."
+					).format(self.vehicle, existing))
+
 		# Quota check only applies when creating a new record
 		if not self.is_new():
 			return
@@ -40,11 +82,17 @@ class CICPA(Document):
 		# Recovered passes (Lost/Cancelled/Expired) free quota back, so only `remaining_*_quota` matters here.
 		if self.cicpa_type == "Vehicle":
 			if loa_doc.remaining_vehicle_quota <= 0:
-				frappe.throw(_("Cannot create CICPA: Vehicle quota exhausted in LOA {0}.").format(loa_doc.name))
+				frappe.throw(_(
+					"Vehicle quota for LOA {0} has been fully consumed. "
+					"Recover an existing pass (Lost / Cancelled / Expired) or increase the LOA quota to proceed."
+				).format(loa_doc.name))
 
 		elif self.cicpa_type == "Driver":
 			if loa_doc.remaining_driver_quota <= 0:
-				frappe.throw(_("Cannot create CICPA: Driver quota exhausted in LOA {0}.").format(loa_doc.name))
+				frappe.throw(_(
+					"Driver quota for LOA {0} has been fully consumed. "
+					"Recover an existing pass (Lost / Cancelled / Expired) or increase the LOA quota to proceed."
+				).format(loa_doc.name))
 
 	def on_submit(self):
 		if self.loa:
@@ -60,7 +108,48 @@ class CICPA(Document):
 				loa_doc.save(ignore_permissions=True)
 			except Exception as e:
 				frappe.log_error(frappe.get_traceback(), "Error updating LOA CICPA count on submit")
-				frappe.throw(_("Failed to update LOA record: {0}").format(str(e)))
+				frappe.throw(_("Could not update the linked LOA. Details: {0}").format(str(e)))
+
+			# Recompute allocated / remaining so the new Active CICPA consumes a slot immediately
+			self._recalculate_loa_quota()
+
+		if self.cicpa_type == "Driver" and self.driver:
+			try:
+				driver_doc = frappe.get_doc("Driver", self.driver)
+				driver_doc.custom_has_cicpa = 1
+				driver_doc.custom_cicpa = self.name
+				existing_refs = [r.reference_no for r in driver_doc.get("custom_certification_list", [])]
+				if self.name not in existing_refs:
+					driver_doc.append("custom_certification_list", {
+						"certification_name": "CICPA",
+						"reference_no": self.name,
+						"date_of_issue": self.issue_date,
+						"date_of_expiry": self.expiry_date,
+						"status": "Active",
+					})
+				driver_doc.save(ignore_permissions=True)
+			except Exception as e:
+				frappe.log_error(frappe.get_traceback(), "CICPA on_submit: Driver linkback failed")
+				frappe.throw(_("Could not attach this CICPA to Driver {0}. Details: {1}").format(self.driver, str(e)))
+
+		elif self.cicpa_type == "Vehicle" and self.vehicle:
+			try:
+				vehicle_doc = frappe.get_doc("Vehicle", self.vehicle)
+				vehicle_doc.custom_has_cicpa = 1
+				vehicle_doc.custom_cicpa = self.name
+				existing_refs = [r.reference_no for r in vehicle_doc.get("custom_vehicle_certifications", [])]
+				if self.name not in existing_refs:
+					vehicle_doc.append("custom_vehicle_certifications", {
+						"certification_name": "CICPA",
+						"reference_no": self.name,
+						"date_of_issue": self.issue_date,
+						"date_of_expiry": self.expiry_date,
+						"status": "Active",
+					})
+				vehicle_doc.save(ignore_permissions=True)
+			except Exception as e:
+				frappe.log_error(frappe.get_traceback(), "CICPA on_submit: Vehicle linkback failed")
+				frappe.throw(_("Could not attach this CICPA to Vehicle {0}. Details: {1}").format(self.vehicle, str(e)))
 
 	def on_update(self):
 		"""Recalculate LOA quota whenever pass status changes.
@@ -278,6 +367,18 @@ def mark_pass_status(name: str, new_status: str):
 	old_status = cicpa.cicpa_status
 	if old_status == new_status:
 		return
+
+	# Reactivating a recovered pass must respect remaining quota
+	if new_status == "Active" and old_status in RECOVERED_STATUSES and cicpa.loa:
+		loa_doc = frappe.get_doc("LOA", cicpa.loa)
+		if cicpa.cicpa_type == "Vehicle" and (loa_doc.remaining_vehicle_quota or 0) <= 0:
+			frappe.throw(_(
+				"Cannot reactivate this pass: Vehicle quota for LOA {0} is fully consumed."
+			).format(loa_doc.name))
+		if cicpa.cicpa_type == "Driver" and (loa_doc.remaining_driver_quota or 0) <= 0:
+			frappe.throw(_(
+				"Cannot reactivate this pass: Driver quota for LOA {0} is fully consumed."
+			).format(loa_doc.name))
 
 	# Persist the new status. db_set is required for submitted docs (docstatus=1).
 	cicpa.db_set("cicpa_status", new_status, update_modified=True)
