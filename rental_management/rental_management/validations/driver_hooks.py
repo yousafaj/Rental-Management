@@ -45,7 +45,18 @@ def validate_driver(doc, method):
                 new_row.reference_no = cicpa_doc.name
 
     else:
-        cicpa_docs = frappe.get_all("CICPA", filters={"driver": doc.name}, fields=["name", "loa"])
+        # Only touch currently-Active submitted CICPAs. Leave historical Lost/Cancelled/Expired
+        # records alone — overwriting their status would destroy audit history and double-count
+        # recoveries.
+        cicpa_docs = frappe.get_all(
+            "CICPA",
+            filters={
+                "driver": doc.name,
+                "docstatus": 1,
+                "cicpa_status": "Active",
+            },
+            fields=["name", "loa"],
+        )
         for cicpa in cicpa_docs:
             frappe.db.set_value("CICPA", cicpa.name, "driver", None)
             frappe.db.set_value("CICPA", cicpa.name, "cicpa_status", "Cancelled")
@@ -63,7 +74,7 @@ def validate_driver(doc, method):
     if loa_to_recalc:
         cicpa_list = frappe.get_all(
             "CICPA",
-            filters={"loa": loa_to_recalc, "cicpa_type": "Driver"},
+            filters={"loa": loa_to_recalc, "cicpa_type": "Driver", "docstatus": 1},
             fields=["name", "driver", "cicpa_status"],
         )
 

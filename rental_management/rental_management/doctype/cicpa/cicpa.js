@@ -27,47 +27,20 @@ frappe.ui.form.on("CICPA", {
 		}
 	},
 
-	after_cancel(frm) {
-		frappe.confirm(
-			"Cancelling this CICPA will also delete all of its linked CICPA Logs. Do you want to proceed?",
-			function () {
-				// Proceed with cancellation
-				frappe.call({
-					method: "frappe.client.get_list",
-					args: {
-						doctype: "CICPA Logs",
-						filters: {
-							cicpa: frm.doc.name
-						},
-						fields: ["name"]
-					},
-					callback: function (r) {
-						if (r.message) {
-							r.message.forEach(log => {
-								frappe.call({
-									method: "frappe.client.delete",
-									args: {
-										doctype: "CICPA Logs",
-										name: log.name
-									},
-									callback: function () {
-										console.log("Deleted log:", log.name);
-									}
-								});
-							});
-						}
-					}
-				});
-				// let cancel continue
-				frm.script_manager.trigger("cancel");
-			},
-			function () {
-				// If user declines confirmation, abort cancellation
-				frappe.msgprint(__("Cancellation was not confirmed. The CICPA remains active."));
-			}
-		);
-
-		// Prevent default cancel until user confirms
-		return false;
+	// `before_cancel` is the right place for a confirmation dialog —
+	// `after_cancel` fires AFTER the doc is already cancelled.
+	// CICPA Logs cleanup happens server-side in Python (before_cancel hook),
+	// so no client-side cleanup is needed.
+	before_cancel(frm) {
+		return new Promise((resolve, reject) => {
+			frappe.confirm(
+				__("Cancelling this CICPA will also delete all of its linked CICPA Logs and recover quota. Do you want to proceed?"),
+				() => resolve(),
+				() => {
+					frappe.show_alert({ message: __("Cancellation aborted."), indicator: "blue" });
+					reject();
+				}
+			);
+		});
 	}
 });

@@ -37,41 +37,42 @@ class CICPA(Document):
 		if self.cicpa_type == "Vehicle" and not self.vehicle:
 			frappe.throw(_("A Vehicle must be selected when CICPA Type is set to Vehicle."))
 
-		# One active CICPA per Driver / Vehicle
-		if self.is_new():
-			if self.cicpa_type == "Driver" and self.driver:
-				existing = frappe.db.get_value(
-					"CICPA",
-					{
-						"driver": self.driver,
-						"cicpa_status": "Active",
-						"docstatus": 1,
-						"name": ["!=", self.name or ""],
-					},
-					"name",
-				)
-				if existing:
-					frappe.throw(_(
-						"Driver {0} already holds an active CICPA ({1}). "
-						"Mark the existing pass as Lost, Cancelled, or Expired before issuing a new one."
-					).format(self.driver, existing))
+		# One active CICPA per Driver / Vehicle.
+		# Runs on every save (drafts AND submits) so two drafts can't both be submitted
+		# for the same driver/vehicle.
+		if self.cicpa_type == "Driver" and self.driver:
+			existing = frappe.db.get_value(
+				"CICPA",
+				{
+					"driver": self.driver,
+					"cicpa_status": "Active",
+					"docstatus": 1,
+					"name": ["!=", self.name or ""],
+				},
+				"name",
+			)
+			if existing:
+				frappe.throw(_(
+					"Driver {0} already holds an active CICPA ({1}). "
+					"Mark the existing pass as Lost, Cancelled, or Expired before issuing a new one."
+				).format(self.driver, existing))
 
-			if self.cicpa_type == "Vehicle" and self.vehicle:
-				existing = frappe.db.get_value(
-					"CICPA",
-					{
-						"vehicle": self.vehicle,
-						"cicpa_status": "Active",
-						"docstatus": 1,
-						"name": ["!=", self.name or ""],
-					},
-					"name",
-				)
-				if existing:
-					frappe.throw(_(
-						"Vehicle {0} already holds an active CICPA ({1}). "
-						"Mark the existing pass as Lost, Cancelled, or Expired before issuing a new one."
-					).format(self.vehicle, existing))
+		if self.cicpa_type == "Vehicle" and self.vehicle:
+			existing = frappe.db.get_value(
+				"CICPA",
+				{
+					"vehicle": self.vehicle,
+					"cicpa_status": "Active",
+					"docstatus": 1,
+					"name": ["!=", self.name or ""],
+				},
+				"name",
+			)
+			if existing:
+				frappe.throw(_(
+					"Vehicle {0} already holds an active CICPA ({1}). "
+					"Mark the existing pass as Lost, Cancelled, or Expired before issuing a new one."
+				).format(self.vehicle, existing))
 
 		# Quota check only applies when creating a new record
 		if not self.is_new():
@@ -177,7 +178,7 @@ class CICPA(Document):
 			if self.cicpa_type == "Vehicle":
 				cicpa_list = frappe.get_all(
 					"CICPA",
-					filters={"loa": self.loa, "cicpa_type": "Vehicle"},
+					filters={"loa": self.loa, "cicpa_type": "Vehicle", "docstatus": 1},
 					fields=["name", "vehicle", "cicpa_status"],
 				)
 				allocated = sum(1 for d in cicpa_list if d.cicpa_status == "Active" and d.vehicle)
@@ -189,7 +190,7 @@ class CICPA(Document):
 			elif self.cicpa_type == "Driver":
 				cicpa_list = frappe.get_all(
 					"CICPA",
-					filters={"loa": self.loa, "cicpa_type": "Driver"},
+					filters={"loa": self.loa, "cicpa_type": "Driver", "docstatus": 1},
 					fields=["name", "driver", "cicpa_status"],
 				)
 				allocated = sum(1 for d in cicpa_list if d.cicpa_status == "Active" and d.driver)
@@ -211,7 +212,12 @@ class CICPA(Document):
 			if self.cicpa_type == "Vehicle":
 				others = frappe.get_all(
 					"CICPA",
-					filters={"loa": self.loa, "cicpa_type": "Vehicle", "name": ["!=", self.name]},
+					filters={
+						"loa": self.loa,
+						"cicpa_type": "Vehicle",
+						"docstatus": 1,
+						"name": ["!=", self.name],
+					},
 					fields=["name", "vehicle", "cicpa_status"],
 				)
 				allocated = sum(1 for d in others if d.cicpa_status == "Active" and d.vehicle)
@@ -224,7 +230,12 @@ class CICPA(Document):
 			elif self.cicpa_type == "Driver":
 				others = frappe.get_all(
 					"CICPA",
-					filters={"loa": self.loa, "cicpa_type": "Driver", "name": ["!=", self.name]},
+					filters={
+						"loa": self.loa,
+						"cicpa_type": "Driver",
+						"docstatus": 1,
+						"name": ["!=", self.name],
+					},
 					fields=["name", "driver", "cicpa_status"],
 				)
 				allocated = sum(1 for d in others if d.cicpa_status == "Active" and d.driver)
@@ -364,6 +375,13 @@ def mark_pass_status(name: str, new_status: str):
 		frappe.throw(_("Invalid pass status: {0}").format(new_status))
 
 	cicpa = frappe.get_doc("CICPA", name)
+
+	if cicpa.docstatus != 1:
+		frappe.throw(_(
+			"Pass status can only be changed on submitted CICPAs. "
+			"This document is in {0} state."
+		).format({0: "Draft", 2: "Cancelled"}.get(cicpa.docstatus, "Unknown")))
+
 	old_status = cicpa.cicpa_status
 	if old_status == new_status:
 		return

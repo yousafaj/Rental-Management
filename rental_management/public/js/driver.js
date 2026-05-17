@@ -1,37 +1,72 @@
 // Copyright (c) 2025, osama.ahmed@deliverydevs.com and contributors
 // For license information, please see license.txt
+//
+// Auto-fetch nationality from the linked Employee when an Employee is selected
+// on the Driver form.
+//
+// The Driver form displays `custom_nationality` (a Link to the Nationality
+// doctype). The standard Driver doctype has no `nationality` field — writing
+// to it raises "Field nationality not found".
+//
+// The Employee doctype typically has a `nationality` field (Link to Country
+// in stock ERPNext, sometimes a Data or custom Link in customised installs).
+// We try a few resolution strategies to map whatever the Employee stores into
+// a valid Nationality record name.
 
 frappe.ui.form.on("Driver", {
 	employee(frm) {
 		if (!frm.doc.employee) return;
-		frappe.db.get_value("Employee", frm.doc.employee, "custom_nationality", (r) => {
-			const value = r && (r.custom_nationality || r.nationality);
-			if (!value) {
-				// Fallback: try the standard Employee.nationality data field
-				frappe.db.get_value("Employee", frm.doc.employee, "nationality", (r2) => {
-					if (r2 && r2.nationality) {
-						resolveNationality(frm, r2.nationality);
-					}
-				});
-				return;
+
+		// Pull both possible Employee fields in one round trip
+		frappe.db.get_value(
+			"Employee",
+			frm.doc.employee,
+			["nationality", "custom_nationality"],
+			(r) => {
+				if (!r) return;
+				const raw = r.custom_nationality || r.nationality;
+				if (!raw) return;
+				resolveNationality(frm, raw);
 			}
-			resolveNationality(frm, value);
-		});
+		);
 	}
 });
 
 function resolveNationality(frm, raw) {
-	// If raw already matches a Nationality record name, use it directly.
+	if (!frm.fields_dict.custom_nationality) {
+		// Defensive: form schema doesn't include the field. Bail silently.
+		return;
+	}
+
+	// 1) Exact match on Nationality record name
 	frappe.db.exists("Nationality", raw).then((exists) => {
 		if (exists) {
-			frm.set_value("nationality", raw);
+			frm.set_value("custom_nationality", raw);
 			return;
 		}
-		// Otherwise try to match by nationality_name
-		frappe.db.get_value("Nationality", { nationality_name: raw }, "name", (nat) => {
-			if (nat && nat.name) {
-				frm.set_value("nationality", nat.name);
+
+		// 2) Match by the `nationality_name` field (case-sensitive)
+		frappe.db.get_value(
+			"Nationality",
+			{ nationality_name: raw },
+			"name",
+			(nat) => {
+				if (nat && nat.name) {
+					frm.set_value("custom_nationality", nat.name);
+					return;
+				}
+
+				// 3) Case-insensitive fuzzy match — handles "INDIA" vs "India"
+				frappe.db.get_list("Nationality", {
+					filters: [["nationality_name", "like", raw]],
+					fields: ["name"],
+					limit: 1,
+				}).then((rows) => {
+					if (rows && rows.length) {
+						frm.set_value("custom_nationality", rows[0].name);
+					}
+				});
 			}
-		});
+		);
 	});
 }
