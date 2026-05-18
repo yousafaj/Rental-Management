@@ -30,35 +30,39 @@ class ExistingCertificates(Document):
 		if not self.row_name or not self.date_of_expiry:
 			return
 
-		# Check if expiry date has changed
-		if self.get_doc_before_save() and self.date_of_expiry != self.get_doc_before_save().date_of_expiry:
-			parent_doc = None
+		prev = self.get_doc_before_save()
+		if not prev or self.date_of_expiry == prev.date_of_expiry:
+			return
 
-			# Determine parent and child table
-			if self.vehicle:
-				parent_doc = frappe.get_doc("Vehicle", self.vehicle)
-				child_table_field = "custom_vehicle_certifications"
-			elif self.customer:
-				parent_doc = frappe.get_doc("Customer", self.customer)
-				child_table_field = "custom_customer_certificates"
-			elif self.driver:
-				parent_doc = frappe.get_doc("Driver", self.driver)
-				child_table_field = "custom_driver_certifications"
-			else:
-				return
+		# Map this record onto the child row of its parent.
+		# IMPORTANT: do NOT call parent_doc.save() — the parent's own validate
+		# would re-sync Existing Certificates and recurse into this validate again.
+		# Update the child row directly via frappe.db.set_value.
+		child_doctype = None
+		if self.vehicle:
+			child_doctype = "Vehicle cdt"
+		elif self.customer:
+			child_doctype = "Customer cdt"
+		elif self.driver:
+			child_doctype = "Driver cdt"
 
-			if parent_doc and hasattr(parent_doc, child_table_field):
-				updated = False
-				for row in getattr(parent_doc, child_table_field):
-					if row.name == self.row_name:
-						row.date_of_expiry = self.date_of_expiry
-						updated = True
-						break
-				if updated:
-					parent_doc.save(ignore_permissions=True)
+		if child_doctype:
+			try:
+				frappe.db.set_value(
+					child_doctype,
+					self.row_name,
+					"date_of_expiry",
+					self.date_of_expiry,
+					update_modified=False,
+				)
+			except Exception:
+				frappe.log_error(
+					frappe.get_traceback(),
+					f"ExistingCertificates {self.name}: failed to sync child row {self.row_name}",
+				)
 
-			if self.certificate_name == "CICPA" and self.reference_no:
-				try:
-					frappe.db.set_value("CICPA", self.reference_no, "expiry_date", self.date_of_expiry)
-				except frappe.DoesNotExistError:
-					frappe.throw(f"CICPA document '{self.reference_no}' not found.")
+		if self.certificate_name == "CICPA" and self.reference_no:
+			try:
+				frappe.db.set_value("CICPA", self.reference_no, "expiry_date", self.date_of_expiry)
+			except frappe.DoesNotExistError:
+				frappe.throw(f"CICPA document '{self.reference_no}' not found.")

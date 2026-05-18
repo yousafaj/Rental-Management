@@ -4,6 +4,10 @@ from frappe import _
 
 @frappe.whitelist()
 def get_available_drivers(mobilization_status: str):
+    # Permission check: caller must be able to read Driver records
+    if not frappe.has_permission("Driver", "read"):
+        frappe.throw(_("Not permitted to list Drivers"), frappe.PermissionError)
+
     drivers = frappe.get_all("Driver", fields=["name", "custom_state", "employee"])
 
     result = []

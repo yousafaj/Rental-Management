@@ -111,7 +111,7 @@
    "default": "Active",
    "fieldname": "cicpa_status",
    "fieldtype": "Select",
-   "label": "CICPA Status",
+   "label": "Pass State",
    "options": "\nActive\nLost\nCancelled\nExpired",
    "read_only": 1
   }

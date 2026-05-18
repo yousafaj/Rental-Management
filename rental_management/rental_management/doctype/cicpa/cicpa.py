@@ -266,6 +266,11 @@ class CICPA(Document):
 				frappe.throw(_("Failed to update LOA record during deletion: {0}").format(str(e)))
 
 	def on_change(self):
+		"""Propagate the latest expiry_date to every matching certification row.
+
+		Don't `break` after the first match — if there happen to be multiple rows
+		referencing this CICPA (legacy / duplicate data), they all need to stay in sync.
+		"""
 		if self.cicpa_type == "Vehicle" and self.vehicle:
 			try:
 				vehicle_doc = frappe.get_doc("Vehicle", self.vehicle)
@@ -275,7 +280,6 @@ class CICPA(Document):
 					if row.certification_name == "CICPA" and row.reference_no == self.name:
 						row.date_of_expiry = self.expiry_date
 						updated = True
-						break
 
 				if updated:
 					vehicle_doc.save(ignore_permissions=True)
@@ -292,7 +296,6 @@ class CICPA(Document):
 					if row.certification_name == "CICPA" and row.reference_no == self.name:
 						row.date_of_expiry = self.expiry_date
 						updated = True
-						break
 
 				if updated:
 					driver_doc.save(ignore_permissions=True)
@@ -306,6 +309,9 @@ class CICPA(Document):
 			self._recover_quota_on_cancel()
 			self.db_set("loa", None, update_modified=False)
 
+		# Set a request-scoped flag so cicpa_logs.on_update knows the cleanup is
+		# happening here and won't re-enter the same loop. Reset in `finally`.
+		frappe.flags.in_cicpa_log_cleanup = True
 		try:
 			cicpa_logs = frappe.get_all(
 				"CICPA Logs",
@@ -314,17 +320,29 @@ class CICPA(Document):
 			)
 
 			for log in cicpa_logs:
-				frappe.db.set_value("CICPA Logs", log.name, "cicpa", None)
+				try:
+					log_doc = frappe.get_doc("CICPA Logs", log.name)
+				except frappe.DoesNotExistError:
+					# Another cleanup path beat us to it — fine, move on.
+					continue
 
-				log_doc = frappe.get_doc("CICPA Logs", log.name)
+				# Previously we did db_set("cicpa", None) here, which fired on_update
+				# and re-entered this same cleanup. Drop that step — we're deleting the
+				# log anyway, so detaching the link first is pointless.
 				if log_doc.docstatus == 1:
+					log_doc.flags.ignore_permissions = True
 					log_doc.cancel()
 
-				log_doc.delete(ignore_permissions=True)
+				try:
+					log_doc.delete(ignore_permissions=True)
+				except frappe.DoesNotExistError:
+					pass
 
 		except Exception as e:
 			frappe.log_error(frappe.get_traceback(), "CICPA before_cancel: CICPA Logs cleanup failed")
 			frappe.throw(_("Cannot cancel CICPA due to linked CICPA Logs: {0}").format(str(e)))
+		finally:
+			frappe.flags.in_cicpa_log_cleanup = False
 
 		if self.cicpa_type == "Vehicle" and self.vehicle:
 			try:
@@ -374,7 +392,20 @@ def mark_pass_status(name: str, new_status: str):
 	if new_status not in allowed:
 		frappe.throw(_("Invalid pass status: {0}").format(new_status))
 
+	# Permission check: must have write access to this specific CICPA before mutating it
+	if not frappe.has_permission("CICPA", "write", doc=name):
+		frappe.throw(_("Not permitted to change pass status on CICPA {0}").format(name), frappe.PermissionError)
+
 	cicpa = frappe.get_doc("CICPA", name)
+
+	# This call mutates the linked LOA's quota counters via _recalculate_loa_quota.
+	# Require LOA write permission too — otherwise CICPA-only writers could escalate
+	# their access to LOA quota fields through this endpoint.
+	if cicpa.loa and not frappe.has_permission("LOA", "write", doc=cicpa.loa):
+		frappe.throw(
+			_("Not permitted to update LOA {0} (required to recompute quota on status change)").format(cicpa.loa),
+			frappe.PermissionError,
+		)
 
 	if cicpa.docstatus != 1:
 		frappe.throw(_(

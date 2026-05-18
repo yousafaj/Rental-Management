@@ -1,41 +1,30 @@
+import re
+
 import frappe
+from frappe.model.naming import make_autoname
 from frappe.utils import now_datetime
 
+
 def autoname_asset(doc, method=None):
-    """
-    Build Asset name like:
-    ACC-ASS-2025-IT-000001
+    """Build Asset name like ``ACC-ASS-2025-IT-000001``.
 
-    Global counter:
-    - always increments by 1 across ALL assets
-    - does NOT reset per year or per reference number
+    Uses Frappe's `tabSeries` to atomically reserve the next 6-digit counter for the prefix.
+    This is concurrency-safe (no race condition) and survives Asset deletions (counter
+    never goes backwards, so we never reuse an already-issued name).
     """
-
-    # 1. Current year (YYYY)
     current_year = now_datetime().strftime("%Y")
 
-    # 2. Required reference number from the Asset
-    ref_no = (getattr(doc, "custom_reference_number", "") or "").strip()
-    if not ref_no:
+    raw_ref = (getattr(doc, "custom_reference_number", "") or "").strip()
+    if not raw_ref:
         frappe.throw("Please set Custom Reference Number before saving the Asset.")
 
-    # 3. Prepare prefix (constant per record for display, but NOT for counting)
-    #    Example: ACC-ASS-2025-IT-
-    series_digits = 6
-    series_prefix = f"ACC-ASS-{current_year}-{ref_no}-"
+    # Sanitize: make_autoname treats `.` as a separator and `#` as a digit placeholder.
+    # Any of those inside the user-supplied ref would corrupt the counter series key.
+    # Allow letters / digits / `_` / `-` only; collapse anything else to `_`.
+    ref_no = re.sub(r"[^A-Za-z0-9_-]", "_", raw_ref)
+    if not ref_no:
+        frappe.throw("Custom Reference Number contains no valid characters (only letters, digits, '_', '-' allowed).")
 
-    # 4. Get global count of ALL assets created so far
-    asset_count = frappe.db.sql(
-        """
-        SELECT COUNT(*) AS cnt
-        FROM `tabAsset`
-        """,
-        as_dict=True,
-    )
-
-    existing = asset_count[0]["cnt"] if asset_count else 0
-    next_number = existing + 1
-
-    # 5. Zero-pad and assign final name
-    counter_str = str(next_number).zfill(series_digits)
-    doc.name = f"{series_prefix}{counter_str}"
+    # `make_autoname` understands `.######` → reserves next 6-digit counter atomically.
+    prefix = f"ACC-ASS-{current_year}-{ref_no}-"
+    doc.name = make_autoname(prefix + ".######")

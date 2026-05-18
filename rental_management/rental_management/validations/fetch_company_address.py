@@ -6,6 +6,10 @@ def get_company_address_string(company_name):
 	if not company_name:
 		return ""
 
+	# Permission check: only users with read access to this Company may resolve its address
+	if not frappe.has_permission("Company", "read", doc=company_name):
+		frappe.throw(_("Not permitted to read Company {0}").format(company_name), frappe.PermissionError)
+
 	# Get first linked Address via Dynamic Link
 	link = frappe.db.get_value("Dynamic Link", {
 		"link_doctype": "Company",

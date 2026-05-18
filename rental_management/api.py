@@ -6,6 +6,12 @@ def get_customer_focal_person(party_name):
     Given a Customer name, find the first Contact linked to it
     and return the formatted string for custom_customer_focal_person.
     """
+    # Permission check: only users who can read this specific Customer may see its contacts
+    if not party_name:
+        return ""
+    if not frappe.has_permission("Customer", "read", doc=party_name):
+        frappe.throw(frappe._("Not permitted to read Customer {0}").format(party_name), frappe.PermissionError)
+
     # find the Dynamic Link record
     links = frappe.get_all(
         "Dynamic Link",
@@ -79,12 +85,14 @@ def fill_employee_details(filters: dict | None = None, limit: int | None = None,
     Returns:
         dict: { "employees": [ {employee, employee_name, department, designation, is_salary_withheld}, ... ] }
     """
+    # Permission check: caller must have at least read access to Payroll Entry to pull employees for payroll
+    if not frappe.has_permission("Payroll Entry", "read"):
+        frappe.throw(_("Not permitted to fetch payroll employees"), frappe.PermissionError)
+
     # Accept payload from args or HTTP form
     if not filters:
         filters = frappe.form_dict or {}
     filters = frappe._dict(filters)
-    
-    frappe.errprint(f"this is filters in my func : {filters}")
 
     required = ["company", "currency", "payroll_payable_account", "start_date", "end_date"]
     missing = [f for f in required if not filters.get(f)]

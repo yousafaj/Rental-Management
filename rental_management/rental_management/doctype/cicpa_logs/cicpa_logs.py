@@ -22,34 +22,32 @@ class CICPALogs(Document):
 		remarks: DF.Text | None
 		vehicle: DF.Link | None
 	# end: auto-generated types
-	pass
-
 
 	def on_update(self):
+		"""Auto-cancel and delete this log when its CICPA link is cleared.
+
+		Guarded by `frappe.flags.in_cicpa_log_cleanup` so we don't recurse when
+		`CICPA.before_cancel` is already iterating these logs. The flag is reset
+		in `finally` to avoid leaking across requests in the same worker.
 		"""
-		If CICPA is removed (set to NULL),
-		auto-cancel and delete this log
-		"""
+		if self.cicpa:
+			return
 
-		# If cicpa is empty → cleanup this log
-		if not self.cicpa:
+		if frappe.flags.in_cicpa_log_cleanup:
+			return
 
-			if frappe.flags.in_cicpa_log_cleanup:
-				return
-
-			frappe.flags.in_cicpa_log_cleanup = True
-
+		frappe.flags.in_cicpa_log_cleanup = True
+		try:
+			doc = frappe.get_doc(self.doctype, self.name)
+			if doc.docstatus == 1:
+				doc.flags.ignore_permissions = True
+				doc.cancel()
 			try:
-				doc = frappe.get_doc(self.doctype, self.name)
-				if doc.docstatus == 1:
-					doc.cancel()
 				doc.delete(ignore_permissions=True)
-			except Exception as e:
-				frappe.log_error(
-					frappe.get_traceback(),
-					"CICPA Logs auto cleanup failed"
-				)
-				frappe.throw(
-					_("Failed to auto-delete CICPA Log: {0}")
-					.format(str(e))
-				)
+			except frappe.DoesNotExistError:
+				pass
+		except Exception as e:
+			frappe.log_error(frappe.get_traceback(), "CICPA Logs auto cleanup failed")
+			frappe.throw(_("Failed to auto-delete CICPA Log: {0}").format(str(e)))
+		finally:
+			frappe.flags.in_cicpa_log_cleanup = False

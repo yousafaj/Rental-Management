@@ -33,6 +33,22 @@ class VehicleMovement(Document):
         vehicle_type: DF.Data | None
     # end: auto-generated types
     
+    def validate(self):
+        """Server-side guard: refuse to mobilise/demobilise an Inactive vehicle.
+
+        The form-side dropdown filter was removed when custom_status was hidden,
+        so this is now the only line of defence.
+        """
+        if not self.vehicle:
+            return
+        vehicle_status = frappe.db.get_value("Vehicle", self.vehicle, "custom_status")
+        if vehicle_status and vehicle_status != "Active":
+            frappe.throw(
+                _("Vehicle {0} is {1}. Only Active vehicles can be used in a Vehicle Movement.").format(
+                    self.vehicle, vehicle_status
+                )
+            )
+
     def on_submit(self):
         try:
             self.update_vehicle()

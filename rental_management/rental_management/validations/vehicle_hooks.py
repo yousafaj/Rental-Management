@@ -46,11 +46,22 @@ def validate_vehicle(doc, method):
                 new_row.reference_no = cicpa_doc.name
 
     else:
-        cicpa_docs = frappe.get_all("CICPA", filters={"vehicle": doc.name}, fields=["name", "loa"])
+        # Only touch currently-Active submitted CICPAs. Leave historical Lost/Cancelled/Expired
+        # records alone — overwriting their status would destroy audit history and double-count
+        # recoveries. Mirrors the driver_hooks.py guard.
+        cicpa_docs = frappe.get_all(
+            "CICPA",
+            filters={
+                "vehicle": doc.name,
+                "docstatus": 1,
+                "cicpa_status": "Active",
+            },
+            fields=["name", "loa"],
+        )
         for cicpa in cicpa_docs:
             frappe.db.set_value("CICPA", cicpa.name, "vehicle", None)
             frappe.db.set_value("CICPA", cicpa.name, "cicpa_status", "Cancelled")
-            frappe.db.set_value("CICPA", cicpa.name, "active", "0")
+            frappe.db.set_value("CICPA", cicpa.name, "active", 0)
             loa_to_recalc = cicpa.loa or loa_to_recalc
             linked_cicpa_name = cicpa.name
             remarks = "Removing Vehicle"
@@ -64,7 +75,7 @@ def validate_vehicle(doc, method):
     if loa_to_recalc:
         cicpa_list = frappe.get_all(
             "CICPA",
-            filters={"loa": loa_to_recalc, "cicpa_type": "Vehicle"},
+            filters={"loa": loa_to_recalc, "cicpa_type": "Vehicle", "docstatus": 1},
             fields=["name", "vehicle", "cicpa_status"],
         )
 

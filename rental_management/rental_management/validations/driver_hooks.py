@@ -60,7 +60,7 @@ def validate_driver(doc, method):
         for cicpa in cicpa_docs:
             frappe.db.set_value("CICPA", cicpa.name, "driver", None)
             frappe.db.set_value("CICPA", cicpa.name, "cicpa_status", "Cancelled")
-            frappe.db.set_value("CICPA", cicpa.name, "active", "0")
+            frappe.db.set_value("CICPA", cicpa.name, "active", 0)
             loa_to_recalc = cicpa.loa or loa_to_recalc
             linked_cicpa_name = cicpa.name
             remarks = "Removing Driver"

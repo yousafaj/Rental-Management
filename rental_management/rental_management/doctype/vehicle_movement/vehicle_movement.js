@@ -19,45 +19,13 @@ frappe.ui.form.on("Vehicle Movement", {
                 }
             });
         }
-        else{
+        else {
             frm.set_value("project_id", null);
         }
     },
 
-    status(frm) {
-        if (frm.doc.status) {
-            frm.set_query("vehicle", () => {
-                if (frm.doc.status === "Mobilise") {
-                    return {
-                        filters: {
-                            custom_state: "Idle",
-                            custom_status: "Active"
-                        }
-                    };
-                } else if (frm.doc.status === "Demobilise") {
-                    return {
-                        filters: {
-                            custom_state: "With Client",
-                            custom_status: "Active"
-                        }
-                    };
-                }
-                else if (frm.doc.status === "Breakdown") {
-                    return {
-                        filters: [
-                            ["custom_status", "=", "Active"]
-                        ]
-                    };
-                }
-                else if (frm.doc.status === "Available for Use") {
-                    return {
-                        filters: {
-                            custom_state: "Workshop",
-                            custom_status: "Active"
-                        }
-                    };
-                }
-            });
-        }
-    },
+    // Note: vehicle dropdown is intentionally unfiltered. Previous filters on
+    // custom_state / custom_status broke once those fields were hidden and
+    // stopped being user-maintained. Users now pick any Vehicle and the
+    // server-side logic in vehicle_movement.py keeps custom_state correct.
 });
