@@ -3,7 +3,7 @@
 Runs once on migrate. Idempotent: skips if the old field no longer exists.
 """
 import frappe
-from frappe.model.rename_field import rename_field
+from frappe.model.utils.rename_field import rename_field
 
 
 def execute():
